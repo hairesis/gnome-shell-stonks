@@ -44,7 +44,7 @@ class YahooStockInfoProvider {
 	this.httpSession = new Soup.Session();
     }
     
-    get_price(name, cb) {
+    get_price(name, cb, on_err) {
 	//TODO: get all priceses at once and use this to filter only the price we want
 	let uri = new Soup.URI(this.URL);
 
@@ -56,20 +56,19 @@ class YahooStockInfoProvider {
 	});
 
 	var res;
-	// execute the request and define the callback
+
 	this.httpSession.queue_message(message, (_httpSession, message) => {
-	    if (message.status_code !== 200){
-		Main.notify(_(`There was an error connecting to the stock quote provider.`));
+	    if (message.status_code == 200){
+		let stock_info = JSON.parse(message.response_body.data);
+
+		stock_info.quoteResponse.result.forEach( si => {
+		    cb(si.regularMarketPrice,
+		       si.regularMarketChange,
+		       si.regularMarketChangePercent)
+		});
+	    } else {
+		on_err(message);
 	    }
-	    let stock_info = JSON.parse(message.response_body.data);
-	    stock_info = stock_info.quoteResponse.result[0]
-	    if (stock_info == undefined){
-		stock_info = {};
-	    }
-	    
-	    cb(stock_info.regularMarketPrice,
-	       stock_info.regularMarketChange,
-	       stock_info.regularMarketChangePercent)
 	});
     }
 }
@@ -85,15 +84,10 @@ class StockItem {
 	this.app = app;
 	this.stock_provider = new YahooStockInfoProvider();
     }
-    
+
     set_price(show_change_p) {
 	this.stock_provider.get_price(this.symbol, (mkt_price, mkt_chng, mkt_chng_p) => {
 
-	    if (mkt_price == undefined || mkt_chng == undefined || mkt_chng_p == undefined) {
-		log('stock not found');
-		return
-	    }
-	    
 	    this.price.set_text(String(mkt_price.toFixed(2)));
 	    let chng = mkt_chng;
 	    let label = '';
@@ -108,6 +102,8 @@ class StockItem {
 	    if (chng < 0){
 		label = "-" + Math.abs(chng) + pc
 		this.change.set_style('background-color: #f94848');
+	    } else {
+		this.change.set_style('background-color: #67db3b');
 	    }
 	    this.change.set_label(label);
 	    
@@ -117,6 +113,11 @@ class StockItem {
 		// keep track of the item for deletion
 		this.app.__index[this.symbol] = this;
 		this.app.save_stocks();
+	    }
+	}, (message) => {
+	    log(`Got ${message.status_code} from stock price provider, disabling`); 
+	    for (const [symbol, item] of Object.entries(this.app.__index)) {
+		item.change.set_style('background-color: grey');
 	    }
 	});
     }
