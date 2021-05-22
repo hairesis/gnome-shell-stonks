@@ -45,6 +45,12 @@ class YahooStockInfoProvider {
     }
     
     get_price(name, cb, on_err) {
+
+	if (name === null || name == undefined) {
+	    log('oh my, what are you trying to do?');
+	    return on_err("unable to load price for an empty stock ticker");
+	}
+	
 	//TODO: get all priceses at once and use this to filter only the price we want
 	let uri = new Soup.URI(this.URL);
 
@@ -73,57 +79,19 @@ class YahooStockInfoProvider {
     }
 }
 
-// keep track of UI objects individually for easier manipulation
+// keep track of UI objects individually for easier lookup
 class StockItem {
 
-    constructor(name, item, price, change, app) {
+    constructor(name, item, price, change) {
 	this.symbol = name;
 	this.item = item;
 	this.price = price;
 	this.change = change;
-	this.app = app;
-	this.stock_provider = new YahooStockInfoProvider();
-    }
-
-    set_price(show_change_p) {
-	this.stock_provider.get_price(this.symbol, (mkt_price, mkt_chng, mkt_chng_p) => {
-
-	    this.price.set_text(String(mkt_price.toFixed(2)));
-	    let chng = mkt_chng;
-	    let label = '';
-	    let pc = "";
-	    if (show_change_p) {
-		chng = mkt_chng_p;
-		pc ='%';
-	    }
-	    chng = chng.toFixed(3);
-
-	    label = "+" + chng + pc;
-	    if (chng < 0){
-		label = "-" + Math.abs(chng) + pc
-		this.change.set_style('background-color: #f94848');
-	    } else {
-		this.change.set_style('background-color: #67db3b');
-	    }
-	    this.change.set_label(label);
-	    
-	    if (this.app.__index[this.name] == undefined) {
-		this.app.menu.addMenuItem(this.item);
-		
-		// keep track of the item for deletion
-		this.app.__index[this.symbol] = this;
-		this.app.save_stocks();
-	    }
-	}, (message) => {
-	    log(`Got ${message.status_code} from stock price provider, disabling`); 
-	    for (const [symbol, item] of Object.entries(this.app.__index)) {
-		item.change.set_style('background-color: grey');
-	    }
-	});
     }
 
     destroy(){
 	this.item.destroy();
+	this.item = null;
     }
     
 }
@@ -132,41 +100,48 @@ class StockItem {
 const Stonks = GObject.registerClass(
 class Stonks extends PanelMenu.Button {
     _init() {
-        super._init(0.0, _('Stonks'));
+        super._init(0.5, _('Stonks'));
 	this.__index = {}
 	this.show_changes_p = false;
-	let gicon = Gio.icon_new_for_string(Me.path + "/icons/guy.svg");
+
 	let icon = new St.Icon({
             style_class: 'system-status-icon',
         })
-	icon.set_gicon(gicon);
+	icon.set_gicon(Gio.icon_new_for_string(Me.path + "/icons/guy.svg"));
         this.add_child(icon);
 
-	this.PATH = `${Me.path}/symbols.json`
-	
+	// JSON database for the registered symbols
+	this.PATH = `${Me.path}/symbols.json`;
+
 	this.menu.addMenuItem(this.searchSection());
 	this.menu.addMenuItem(new PopupMenu.PopupSeparatorMenuItem());
 	this.menu.connect('open-state-changed', (actor, open) => {
 	    if (open){
-		this.refresh_prices()
+		this.refresh_prices();
 	    }
 	});
-	this.load_symbols()
+
+	this.stock_provider = new YahooStockInfoProvider();
+	this.load_symbols();
 	
     }
 
+    _log(message){
+	log(`STONKS: ${message}`)
+    }
+    
     load_symbols(){
-	log(`loading symbols from ${this.PATH} ...`)
+	this._log(`loading symbols from ${this.PATH} ...`)
 	if (GLib.file_test(this.PATH, GLib.FileTest.EXISTS)) {
 	    try {
 		let symbols = JSON.parse(Shell.get_file_contents_utf8_sync(this.PATH));
-		log(`loaded ${symbols} from ${this.PATH}`)
+		this._log(`loaded ${symbols} from ${this.PATH}`)
 		symbols.forEach(symbol => { this.new_item(symbol) });
-	    } catch {
-		Main.notify(_(`Database malformed. Inspect it at ${this.PATH}`));
+	    } catch(err) {
+		this._log(`Error: ${err}`);
 	    }
 	} else {
-	    log('no stock symbols found. Add some stocks to create one!');
+	    this._log('no stock symbols found. Add some stocks to create one!');
 	}
     }
     
@@ -197,12 +172,46 @@ class Stonks extends PanelMenu.Button {
 
 
     refresh_stock(stock){
-	stock.set_price(this.show_changes_p);
+	this.stock_provider.get_price(stock.symbol, (mkt_price, mkt_chng, mkt_chng_p) => {
+	    
+	    stock.price.set_text(String(mkt_price.toFixed(2)));
+	    let chng = mkt_chng;
+	    let label = '';
+	    let pc = "";
+	    if (this.show_changes_p) {
+		chng = mkt_chng_p;
+		pc ='%';
+	    }
+	    chng = chng.toFixed(3);
+
+	    label = "+" + chng + pc;
+	    if (chng < 0){
+		label = "-" + Math.abs(chng) + pc
+		stock.change.set_style('background-color: #f94848');
+	    } else {
+		stock.change.set_style('background-color: #67db3b');
+	    }
+	    stock.change.set_label(label);
+	    
+	    if (this.__index[stock.symbol] == undefined) {
+		this.menu.addMenuItem(stock.item);
+		
+		// keep track of the item for deletion
+		this.__index[stock.symbol] = stock;
+		this.save_stocks();
+	    }
+	}, (message) => {
+	    // grey out change box on connection errors
+	    this._log(`Got ${message.status_code} from stock price provider, disabling`); 
+	    for (const [symbol, item] of Object.entries(this.__index)) {
+		item.change.set_style('background-color: grey');
+	    }
+	});
     }
 
     refresh_prices(){
 	for (const [symbol, item] of Object.entries(this.__index)) {
-	    log(`refresh prices for ${symbol}`)
+	    this._log(`refresh prices for ${symbol}`)
 	    this.refresh_stock(item);
 	}
     }
@@ -212,19 +221,18 @@ class Stonks extends PanelMenu.Button {
 	// TODO: we could do a more fine-graned approach but realisticaly, it'd be
 	// like 50 stocks? If you have more, let's talk.
 	GLib.file_set_contents(this.PATH, JSON.stringify(Object.keys(this.__index)))
-	log('saved stocks in local json file');
+	this._log('saved stocks in local json file');
     }
 
     // toggles price change from dollars to pc
+    // TODO: add market cap on third click
     toggle_price_changes(){
 	this.show_changes_p = !this.show_changes_p;
-	for (const [symbol, item] of Object.entries(this.__index)) {
-	    item.set_price(this.show_changes_p);
-	}
+	this.refresh_prices();
     }
     
     new_item(name){
-	
+
 	let button = new St.BoxLayout(
 	    {
 		style_class: 'StBoxLayout',
@@ -232,12 +240,22 @@ class Stonks extends PanelMenu.Button {
 		can_focus: true,
 		track_hover: true
 	    });
-	
+
+	// stock ticker symbol
 	let symbol = new St.Label({ style_class: 'symbol-label', text: name});
-	let price = new St.Label({ style_class: 'status-label', text: '?'});
-	let pchange = new St.Label({style_class: 'spacer' ,text:' (?) '});
+
+	// current price on open market
+	let price = new St.Label({ style_class: 'status-label', text: 'NA'});
+
+	// price change in percentage since opening
+	let pchange = new St.Label({style_class: 'spacer' ,text:'NA'});
+
+	// ditto
 	let spacer = new St.Label({style_class: 'spacer', text:''});
-	let change = new St.Button({label: " -- ", style_class: 'price-change'});
+
+	// price change in dollars
+	let change = new St.Button({label: " NA ", style_class: 'price-change'});
+
 	change.connect('button_press_event', (actor) => {
 	    this.toggle_price_changes();
 	});
@@ -263,27 +281,23 @@ class Stonks extends PanelMenu.Button {
 	     track_hover: true }
 	);
 	
-	remove_icon.connect('button_press_event', (actor) => {
-	    // this is brutal and generates an exception.
-	    // TODO: find a way to remove the menuItem.
+	remove_icon.connect('button_press_event', (actor) => {	    
+	    this._log("Destroying actor " + actor.__tag);
 	    
-	    log("Destroying actor " + actor.__tag);
-	    let element = this.__index[actor.__tag];
-	    
-	    if (element != null){
-		element.destroy();
-		delete this.__index[actor.__tag];
+	    if (this.__index[actor.__tag] != undefined){
+		this.__index[actor.__tag].destroy();
+		delete this.__index[actor.__tag];		
 	    } else {
-		log('unable to delete ' + actor.__tag + ' from index');
+		this._log('unable to delete ' + actor.__tag + ' from index');
 	    }
 	    this.save_stocks();
 	});
 	
-	// tag the icon and item for future lookups
+	// tag the icon and item for indexes lookups
 	remove_icon.__tag = name	
 	item.add_actor(remove_icon);
 
-	let stock = new StockItem(name, item, price, change, this);
+	let stock = new StockItem(name, item, price, change);
 
 	this.refresh_stock(stock);
     }
