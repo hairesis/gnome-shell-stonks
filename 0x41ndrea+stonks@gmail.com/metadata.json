@@ -1,8 +1,10 @@
 {
-  "name": "stonks",
-  "description": "track your stonks, to the moon!",
-  "uuid": "0x41ndrea+stonks@gmail.com",
-  "shell-version": [
-    "40"
-  ]
+    "name": "stonks",
+    "description": "track your stonks, to the moon!",
+    "uuid": "0x41ndrea+stonks@gmail.com",
+    "shell-version": [
+	"40"
+    ],
+    "url": "https://github.com/hairesis/gnome-shell-stonks",
+    "version": 0.5
 }

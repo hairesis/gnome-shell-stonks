@@ -37,6 +37,21 @@ const _ = Gettext.gettext;
 const { GObject, St, Gio } = imports.gi;
 
 
+function get_settings () {
+    let GioSSS = Gio.SettingsSchemaSource;
+    let schemaSource = GioSSS.new_from_directory(
+	Me.dir.get_child("schemas").get_path(),
+	GioSSS.get_default(),
+	false
+    );
+    let schemaObj = schemaSource.lookup(
+	'org.gnome.shell.extensions.stonks', true);
+    if (!schemaObj) {
+	throw new Error('cannot find schemas');
+    }
+    return new Gio.Settings({ settings_schema : schemaObj });
+}
+
 class YahooStockInfoProvider {
 
     URL = "https://query1.finance.yahoo.com/v7/finance/quote"
@@ -103,119 +118,115 @@ class StockItem {
 
 
 const Stonks = GObject.registerClass(
-class Stonks extends PanelMenu.Button {
-    _init() {
-        super._init(0.5, _('Stonks'));
-	this.__index = {}
-	this.show_changes_p = false;
+    class Stonks extends PanelMenu.Button {
 
-	let icon = new St.Icon({
-            style_class: 'system-status-icon',
-        })
-	icon.set_gicon(Gio.icon_new_for_string(Me.path + "/icons/guy.svg"));
-        this.add_child(icon);
+	_init() {
+            super._init(0.5, _('Stonks'));
+	    this._settings = get_settings();
+	    this.__index = {}
+	    this.show_changes_p = false;
+	    
+	    let icon = new St.Icon({
+		style_class: 'system-status-icon',
+            })
+	    icon.set_gicon(Gio.icon_new_for_string(Me.path + "/icons/guy.svg"));
+            this.add_child(icon);
+	    
+	    // JSON database for the registered symbols
+	    this.PATH = `${Me.path}/symbols.json`;
 
-	// JSON database for the registered symbols
-	this.PATH = `${Me.path}/symbols.json`;
-
-	this.menu.addMenuItem(this.searchSection());
-	this.menu.addMenuItem(new PopupMenu.PopupSeparatorMenuItem());
-	this.menu.connect('open-state-changed', (actor, open) => {
-	    if (open){
-		this.refresh_prices();
-	    }
-	});
-
-	this.stock_provider = new YahooStockInfoProvider();
-	this.load_symbols();
-	
-    }
-
-    _log(message){
-	log(`STONKS: ${message}`)
-    }
-    
-    load_symbols(){
-	this._log(`loading symbols from ${this.PATH} ...`)
-	if (GLib.file_test(this.PATH, GLib.FileTest.EXISTS)) {
-	    try {
-		let symbols = JSON.parse(Shell.get_file_contents_utf8_sync(this.PATH));
-		this._log(`loaded ${symbols} from ${this.PATH}`)
-		symbols.forEach(symbol => { this.new_item(symbol) });
-	    } catch(err) {
-		this._log(`Error: ${err}`);
-	    }
-	} else {
-	    this._log('no stock symbols found. Add some stocks to create one!');
+	    this.menu.addMenuItem(this.searchSection());
+	    this.menu.addMenuItem(new PopupMenu.PopupSeparatorMenuItem());
+	    this.menu.connect('open-state-changed', (actor, open) => {
+		if (open){
+		    this.refresh_prices();
+		}
+	    });
+	    
+	    this.stock_provider = new YahooStockInfoProvider();
+	    this.load_symbols();
+	    this._debug = this._settings.get_boolean('debug')
 	}
-    }
+	
+	_log(message){
+	    if (this._debug == true){
+		log(`STONKS: ${message}`);
+	    }
+	}
+	
+	load_symbols(){
+	    this._log(`loading symbols from ${this.PATH} ...`)
+	    let symbols = this._settings.get_strv('stocks');
+	    this._log(`loaded ${symbols}`)
+	    symbols.forEach(symbol => { this.new_item(symbol) });
+	}
     
-    searchSection(){
-	let searchSection = new PopupMenu.PopupMenuSection();
-		
-	let search = new St.Entry({
-	    name: "newCompanyEntry",
-	    hint_text: _("Stock Symbol"),
-	    track_hover: true,
-	    can_focus: true
-	});
-	
-	let query = search.clutter_text;
-
-	query.connect("key_press_event", (actor, event) => {
-	    if (event.get_key_symbol() == Clutter.KEY_Return){
-		this.menu.toggle();
-		let tickers = actor.get_text().toUpperCase();
-		// allow list of tickers in search box
-		tickers = tickers.split(',');
-		tickers.forEach(t => this.new_item(t.trim()));
-		search.set_text('');
-	    }
-	});
-	
-	searchSection.actor.add_actor(search);
-	searchSection.actor.add_style_class_name('newCompanySection');
-	return searchSection;
-    }
-
-
-    refresh_stock(stock){
-	this.stock_provider.get_price(stock.symbol, (mkt_price, mkt_chng, mkt_chng_p) => {
+	searchSection(){
+	    let searchSection = new PopupMenu.PopupMenuSection();
 	    
-	    stock.price.set_text(String(mkt_price.toFixed(2)));
-	    let chng = mkt_chng;
-	    let label = '';
-	    let pc = "";
-	    if (this.show_changes_p) {
-		chng = mkt_chng_p;
-		pc ='%';
-	    }
-	    chng = chng.toFixed(3);
-
-	    label = "+" + chng + pc;
-	    if (chng < 0){
-		label = "-" + Math.abs(chng) + pc
-		stock.change.set_style('background-color: #f94848');
-	    } else {
-		stock.change.set_style('background-color: #67db3b');
-	    }
-	    stock.change.set_label(label);
+	    let search = new St.Entry({
+		name: "newCompanyEntry",
+		hint_text: _("Stock Symbol"),
+		track_hover: true,
+		can_focus: true
+	    });
 	    
-	    if (this.__index[stock.symbol] == undefined) {
-		this.menu.addMenuItem(stock.item);
+	    let query = search.clutter_text;
+	    
+	    query.connect("key_press_event", (actor, event) => {
+		if (event.get_key_symbol() == Clutter.KEY_Return){
+		    this.menu.toggle();
+		    let tickers = actor.get_text().toUpperCase();
+		    // allow list of tickers in search box
+		    tickers = tickers.split(',');
+		    tickers.forEach(t => this.new_item(t.trim()));
+		    search.set_text('');
+		}
+	    });
+	    
+	    searchSection.actor.add_actor(search);
+	    searchSection.actor.add_style_class_name('newCompanySection');
+	    return searchSection;
+	}
+	
+	
+	refresh_stock(stock){
+	    this.stock_provider.get_price(stock.symbol, (mkt_price, mkt_chng, mkt_chng_p) => {
 		
-		// keep track of the item for deletion
-		this.__index[stock.symbol] = stock;
-		this.save_stocks();
-	    }
-	}, (message) => {
-	    // grey out change box on connection errors
-	    this._log(`Got ${message.status_code} from stock price provider, disabling`); 
-	    for (const [symbol, item] of Object.entries(this.__index)) {
-		item.change.set_style('background-color: grey');
-	    }
-	});
-    }
+		stock.price.set_text(String(mkt_price.toFixed(2)));
+		let chng = mkt_chng;
+		let label = '';
+		let pc = "";
+		if (this.show_changes_p) {
+		    chng = mkt_chng_p;
+		    pc ='%';
+		}
+		chng = chng.toFixed(3);
+		
+		label = "+" + chng + pc;
+		if (chng < 0){
+		    label = "-" + Math.abs(chng) + pc
+		    stock.change.set_style('background-color: #f94848');
+		} else {
+		    stock.change.set_style('background-color: #67db3b');
+		}
+		stock.change.set_label(label);
+		
+		if (this.__index[stock.symbol] == undefined) {
+		    this.menu.addMenuItem(stock.item);
+		    
+		    // keep track of the item for deletion
+		    this.__index[stock.symbol] = stock;
+		    this.save_stocks();
+		}
+	    }, (message) => {
+		// grey out change box on connection errors
+		this._log(`Got ${message.status_code} from stock price provider, disabling`); 
+		for (const [symbol, item] of Object.entries(this.__index)) {
+		    item.change.set_style('background-color: grey');
+		}
+	    });
+	}
 
     refresh_prices(){
 	for (const [symbol, item] of Object.entries(this.__index)) {
@@ -225,11 +236,8 @@ class Stonks extends PanelMenu.Button {
     }
     
     save_stocks(){
-	// TODO: replace this function w/ gnome settings
-	// TODO: we could do a more fine-graned approach but realisticaly, it'd be
-	// like 50 stocks? If you have more, let's talk.
-	GLib.file_set_contents(this.PATH, JSON.stringify(Object.keys(this.__index)))
-	this._log('saved stocks in local json file');
+	this._settings.set_strv('stocks', Object.keys(this.__index))
+	this._log('saved stocks in gsettings');
     }
 
     // toggles price change from dollars to pc
@@ -317,15 +325,14 @@ class Stonks extends PanelMenu.Button {
 
 
 class Extension {
-    constructor(uuid) {
-        this._uuid = uuid;
-
+    constructor(meta) {
+	this._meta = meta;
         ExtensionUtils.initTranslations(GETTEXT_DOMAIN);
     }
 
     enable() {
         this._stonks = new Stonks();
-        Main.panel.addToStatusArea(this._uuid, this._stonks);
+        Main.panel.addToStatusArea(this._meta.uuid, this._stonks);
     }
 
     disable() {
@@ -335,5 +342,5 @@ class Extension {
 }
 
 function init(meta) {
-    return new Extension(meta.uuid);
+    return new Extension(meta);
 }

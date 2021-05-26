@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<schemalist>
+
+  <schema id="org.gnome.shell.extensions.stonks"
+    path="/org/gnome/shell/extensions/stonks/">
+
+    <key type="b" name="debug">
+      <default>false</default>
+      <summary>debug</summary>
+      <description>print debug logs</description>
+    </key>
+
+    <key type="as" name="stocks">
+      <default>['GME']</default>
+      <summary>default stock list</summary>
+      <description>list of all your stocks</description>
+    </key>
+    
+  </schema>
+
+</schemalist>
