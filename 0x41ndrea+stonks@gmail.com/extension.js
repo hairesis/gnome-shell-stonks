@@ -24,13 +24,14 @@ const Clutter = imports.gi.Clutter;
 const ExtensionUtils = imports.misc.extensionUtils;
 const GETTEXT_DOMAIN = 'my-stonks-extension';
 const GLib = imports.gi.GLib;
-const Gettext = imports.gettext.domain(GETTEXT_DOMAIN);
+const Gettext = imports.gettext.domain(GETTEXT_DOMAIN)
 const Main = imports.ui.main;
 const Me = imports.misc.extensionUtils.getCurrentExtension();
 const PanelMenu = imports.ui.panelMenu;
 const PopupMenu = imports.ui.popupMenu;
 const Shell = imports.gi.Shell;
 const Soup = imports.gi.Soup;
+const Util = imports.misc.util;
 
 const _ = Gettext.gettext;
 const { GObject, St, Gio } = imports.gi;
@@ -42,6 +43,10 @@ class YahooStockInfoProvider {
     
     constructor(){
 	this.httpSession = new Soup.Session();
+    }
+
+    static get INFO_URL() {
+	return "https://finance.yahoo.com/quote/"
     }
     
     get_price(name, cb, on_err) {
@@ -160,7 +165,10 @@ class Stonks extends PanelMenu.Button {
 	query.connect("key_press_event", (actor, event) => {
 	    if (event.get_key_symbol() == Clutter.KEY_Return){
 		this.menu.toggle();
-		this.new_item(actor.get_text().toUpperCase());
+		let tickers = actor.get_text().toUpperCase();
+		// allow list of tickers in search box
+		tickers = tickers.split(',');
+		tickers.forEach(t => this.new_item(t.trim()));
 		search.set_text('');
 	    }
 	});
@@ -265,6 +273,10 @@ class Stonks extends PanelMenu.Button {
 	button.insert_child_at_index(price, 3);
 	button.insert_child_at_index(change, 4);
 
+	button.connect('button_press_event', actor => {
+	    Util.spawn(['xdg-open',  YahooStockInfoProvider.INFO_URL + name]);
+	});
+	
 	let status_icon = new St.Icon({
 	    icon_name: 'share-neutral',
 	    style_class: 'popup-menu-icon' });
@@ -312,13 +324,13 @@ class Extension {
     }
 
     enable() {
-        this._indicator = new Stonks();
-        Main.panel.addToStatusArea(this._uuid, this._indicator);
+        this._stonks = new Stonks();
+        Main.panel.addToStatusArea(this._uuid, this._stonks);
     }
 
     disable() {
-        this._indicator.destroy();
-        this._indicator = null;
+        this._stonks.destroy();
+        this._stonks = null;
     }
 }
 
